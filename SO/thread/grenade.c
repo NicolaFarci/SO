@@ -24,6 +24,21 @@ void *grenade_left_thread(void *arg) {
 
     // Aggiorna la posizione finché non raggiunge il bordo sinistro
     while (msg.entity.x > 0) {
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_PAUSED){
+            pthread_mutex_unlock(&game_state_mutex); //sblocca subito per evitare che rimanga bloccato
+            usleep(100000); // aspetta un po e ricontrolla se è ancora in pausa
+            continue;
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+        
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+
         usleep(args->speed);
         msg.entity.x += args->dx;
         buffer_push(buffer, msg);
@@ -57,6 +72,21 @@ void *grenade_right_thread(void *arg) {
     
     // Aggiorna la posizione finché non raggiunge il bordo destro
     while (msg.entity.x < MAP_WIDTH) {
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_PAUSED){
+            pthread_mutex_unlock(&game_state_mutex); //sblocca subito per evitare che rimanga bloccato
+            usleep(100000); // aspetta un po e ricontrolla se è ancora in pausa
+            continue;
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+
         usleep(args->speed);
         msg.entity.x += args->dx; 
         buffer_push(buffer, msg);

@@ -26,13 +26,27 @@ void *consumer_thread(void *arg) {
 
     Message msg;
     
-    int score = INITIAL_SCORE;
     int lives = NUM_LIVES;
     int time = ROUND_TIME;
     int hole_index = -1;
     int holes_reached = 0;
 
     while (lives > 0) {
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_PAUSED){
+            pthread_mutex_unlock(&game_state_mutex); //sblocca subito per evitare che rimanga bloccato
+            usleep(100000); // aspetta un po e ricontrolla se è ancora in pausa
+            continue;
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+
         msg = buffer_pop(buffer);
         switch (msg.type) {
             case MSG_FROG_UPDATE:
@@ -44,7 +58,7 @@ void *consumer_thread(void *arg) {
                     if (hole_index != -1) {
                         hole_update(game_win,hole_index);
                         holes_reached++;
-                        score += time * 100;
+                        update_score(time * 100);
                         time = ROUND_TIME;
                         reset_round();
                         frog.x = (MAP_WIDTH - FROG_WIDTH ) / 2 ;
@@ -74,14 +88,11 @@ void *consumer_thread(void *arg) {
                 break;
         }
         if (lives <= 0 || holes_reached == NUM_HOLES) {
-            werase(game_win);
-            box(game_win,0,0);
-            if (holes_reached == NUM_HOLES)
-                mvwprintw(game_win, MAP_HEIGHT / 2, (MAP_WIDTH - 22) / 2, "HAI VINTO! Score: %d", score);
-            else
-                mvwprintw(game_win, MAP_HEIGHT / 2, (MAP_WIDTH - 22) / 2, "HAI PERSO! Score: %d", score);
-            wrefresh(game_win);
-            sleep(2);
+            if (holes_reached == NUM_HOLES){
+                pthread_mutex_lock(&game_state_mutex);
+                game_state = GAME_WIN;
+                pthread_mutex_unlock(&game_state_mutex);
+            }
             break;
         }
         pthread_mutex_lock(&render_mutex);
@@ -102,3 +113,8 @@ void reset_round() {
     pthread_mutex_unlock(&reset_mutex);
 }
 
+void update_score(int points) {
+    pthread_mutex_lock(&render_mutex);
+    score += points;
+    pthread_mutex_unlock(&render_mutex);
+}

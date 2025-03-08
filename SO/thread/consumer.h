@@ -12,5 +12,6 @@ typedef struct {
 void *consumer_thread(void *arg);
 void clamp_entity(Entity *entity);
 void reset_round();
+void update_score(int points);
 
 #endif

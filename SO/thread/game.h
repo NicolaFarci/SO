@@ -81,6 +81,13 @@ typedef struct {
     pthread_cond_t empty;
 } CircularBuffer;
 
+//Stato attuale del gioco
+typedef enum {
+    GAME_RUNNING,
+    GAME_PAUSED,
+    GAME_QUITTING,
+    GAME_WIN
+} GameState;
 
 extern int round_reset_flag;
 extern pthread_mutex_t reset_mutex;
@@ -88,9 +95,16 @@ extern pthread_mutex_t reset_mutex;
 extern int active_grenades;
 extern pthread_mutex_t grenade_mutex;
 
+extern int game_state;
+extern pthread_mutex_t game_state_mutex;
+
+extern int score;
 
 void show_instructions(WINDOW *menu_win);
 void exit_program(WINDOW *menu_win);
 void start_game();
+void game_state_win();
+void game_over();
+void restart_game();
 
 #endif
