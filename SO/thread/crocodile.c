@@ -5,12 +5,13 @@
 #include <time.h>
 
 void init_lanes(RiverLane lanes[]) {
-    
     // First lane direction is random
     lanes[0].direction = (rand() % 2 == 0) ? 1 : -1;
     lanes[0].speed = 200000;
     lanes[0].y = MAP_HEIGHT - 7;
     lanes[0].index = 0;
+    lanes[0].movements = 0;
+    lanes[0].movements_to_spawn = 15; // Initial value
     
     // Alternate directions for subsequent lanes
     for (int i = 1; i < NUM_RIVER_LANES; i++) {
@@ -18,61 +19,12 @@ void init_lanes(RiverLane lanes[]) {
         lanes[i].speed = lanes[i-1].speed - 10000;
         lanes[i].y = lanes[i-1].y - FROG_HEIGHT;
         lanes[i].index = i;
+        lanes[i].movements = 0;
+        lanes[i].movements_to_spawn = 15 + (2 * i); // Different thresholds for each lane
     }
-}
-
-void* lane_thread(void* arg){
-    LaneArgs* args = (LaneArgs*) arg;
-    CircularBuffer* buffer = args->buffer;
-    RiverLane* lane = args->lane;
-    Message msg;
-
-    msg.type = MSG_CROC_SPAWN;
-    msg.id = lane->index;
-
-    int delay= rand()% 7 + 4;//i coccodrilli vengono spawnati ogni 3-6 secondi
-
-    while (1){
-    // Check if the game is paused or quitting
-        pthread_mutex_lock(&game_state_mutex);
-        if (game_state == GAME_PAUSED) {
-            pthread_mutex_unlock(&game_state_mutex);
-            usleep(100000);
-            continue;
-        }
-        if (game_state == GAME_QUITTING || game_state == GAME_WIN) {
-            pthread_mutex_unlock(&game_state_mutex);
-            pthread_exit(NULL);
-        }
-        pthread_mutex_unlock(&game_state_mutex);
-        
-        // Check for round reset
-        pthread_mutex_lock(&reset_mutex);
-        if (round_reset_flag) {
-            pthread_mutex_unlock(&reset_mutex);
-            // Maybe clear all existing crocodiles?
-            continue;
-        }
-        pthread_mutex_unlock(&reset_mutex);
-        
-        usleep(delay * 500000);
-
-        pthread_t croc_tid;
-        CrocodileArgs* croc_args = malloc(sizeof(CrocodileArgs));
-        croc_args->buffer = buffer;
-        croc_args->lane = lane;
-        pthread_create(&croc_tid, NULL, crocodile_thread, croc_args);  // Pass croc_args directly
-        pthread_detach(croc_tid);
-    
-    }
-    
-    
-    return NULL;
-    
 }
 
 void crocodile_init(Entity *crocodile, RiverLane *lane) {
-    
     crocodile->type = ENTITY_CROCODILE;
     crocodile->width = CROCODILE_WIDTH;
     crocodile->height = CROCODILE_HEIGHT;
@@ -82,7 +34,7 @@ void crocodile_init(Entity *crocodile, RiverLane *lane) {
     
     // Initial x position based on direction
     if (lane->direction > 0) {
-        crocodile->x = 1 - CROCODILE_WIDTH ;
+        crocodile->x = 1 - CROCODILE_WIDTH;
     } else {
         crocodile->x = MAP_WIDTH - 1;
     }
@@ -106,19 +58,17 @@ void *crocodile_thread(void *arg) {
     RiverLane *lane = args->lane;
 
     Message msg;
-    
-    
     Entity crocodile;
     
     // Initialize crocodile
-    crocodile_init(&crocodile,lane);
+    crocodile_init(&crocodile, lane);
     
     // Prepare message
     msg.type = MSG_CROC_SPAWN;
-    msg.id= lane->index;
+    msg.id = lane->index;
     msg.entity = crocodile;
 
-    buffer_push(buffer,msg);
+    buffer_push(buffer, msg);
 
     msg.type = MSG_CROC_UPDATE;
 
@@ -147,18 +97,19 @@ void *crocodile_thread(void *arg) {
         crocodile.x += crocodile.dx;
         
         // Check for boundaries
-        if ((crocodile.dx > 0 && crocodile.x > MAP_WIDTH)||
-            (crocodile.dx < 0 && crocodile.x < 1 - crocodile.width) ) {
-                break;
+        if ((crocodile.dx > 0 && crocodile.x > MAP_WIDTH) ||
+            (crocodile.dx < 0 && crocodile.x < 1 - crocodile.width)) {
+            break;
         }
         
         // Prepare and send message
         msg.entity = crocodile;
         buffer_push(buffer, msg);
     }
+
     msg.type = MSG_CROC_DESPAWN;
     msg.entity = crocodile;
-    buffer_push(buffer,msg);
+    buffer_push(buffer, msg);
     
     return NULL;
 }

@@ -7,6 +7,7 @@ typedef struct {
     CircularBuffer *buffer;
     WINDOW *game_win;
     WINDOW *info_win;
+    RiverLane* lanes;
 } ConsumerArgs;
 
 void *consumer_thread(void *arg);

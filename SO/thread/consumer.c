@@ -19,6 +19,10 @@ void clamp_entity(Entity *entity) {
 
 void *consumer_thread(void *arg) {
     ConsumerArgs *args = (ConsumerArgs *)arg;
+    RiverLane lanes[NUM_RIVER_LANES];
+    for(int i = 0; i < NUM_RIVER_LANES; i++){
+    	lanes[i]= args->lanes[i];
+    }
     CircularBuffer *buffer = args->buffer;
     WINDOW *game_win = args->game_win;
     WINDOW *info_win = args->info_win;
@@ -269,6 +273,24 @@ void *consumer_thread(void *arg) {
                         clear_crocodile(game_win, &current->data.entity);
                         current->data = msg;
                         draw_crocodile(game_win, &current->data.entity);
+
+                        //se a muoversi e' l'ultimo coccodrillo della lista
+                        if (current == lane_list[msg.id].tail){
+                            // Increment movement counter for this lane
+                            lanes[msg.id].movements++;
+                        
+                            // Check if we should spawn a new crocodile
+                            if (lanes[msg.id].movements >= lanes[msg.id].movements_to_spawn) {
+                                lanes[msg.id].movements = 0;
+                                // Spawn new crocodile
+                                pthread_t croc_tid;
+                                CrocodileArgs* croc_args = malloc(sizeof(CrocodileArgs));
+                                croc_args->buffer = buffer;
+                                croc_args->lane = &lanes[msg.id];
+                                pthread_create(&croc_tid, NULL, crocodile_thread, croc_args);
+                                pthread_detach(croc_tid);
+                            }
+                        }
                         
                         if(frog.x>=msg.entity.x && frog.x+FROG_WIDTH<=msg.entity.x+CROCODILE_WIDTH && frog.y==msg.entity.y){
                             clear_frog(game_win,&frog);

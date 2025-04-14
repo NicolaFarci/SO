@@ -9,13 +9,7 @@ typedef struct {
     RiverLane* lane;
 } CrocodileArgs;
 
-typedef struct{
-    CircularBuffer *buffer;
-    RiverLane* lane;
-}LaneArgs;
-
 void init_lanes(RiverLane lanes[]);
-void *lane_thread(void *arg);
 void *crocodile_thread(void *arg);
 void draw_crocodile(WINDOW *win, Entity *crocodile);
 void clear_crocodile(WINDOW *win, Entity *crocodile);

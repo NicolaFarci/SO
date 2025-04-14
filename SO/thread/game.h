@@ -68,6 +68,8 @@ typedef struct{
     int direction;
     int speed;
     int index;
+    int movements;
+    int movements_to_spawn;
 }RiverLane;
 
 //Tipi di messaggi
