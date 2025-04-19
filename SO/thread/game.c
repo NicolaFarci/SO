@@ -2,6 +2,7 @@
 #include "crocodile.h"
 #include "frog.h"
 #include "consumer.h"
+#include "time.h"
 #include "timer.h"
 #include "buffer.h"
 #include "map.h"
@@ -19,6 +20,7 @@ pthread_mutex_t game_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 int score = INITIAL_SCORE;
 
 void start_game() {
+    srand(time(NULL));
     // Inizializzo la finestra di gioco
     int game_starty = (LINES - MAP_HEIGHT) / 2;
     int game_startx = (COLS - MAP_WIDTH) / 2;
@@ -54,7 +56,7 @@ void start_game() {
     pthread_create(&timer_tid, NULL, timer_thread, &timer_args);
     pthread_create(&consumer_tid, NULL, consumer_thread, &consumer_args);
 
-    // Spawn initial crocodiles for each lane
+    // Spawn coccodrilli iniziali.
     for (int i = 0; i < NUM_RIVER_LANES; i++) {
         pthread_t croc_tid;
         CrocodileArgs* croc_args = malloc(sizeof(CrocodileArgs));

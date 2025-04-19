@@ -61,6 +61,8 @@ typedef struct {
     int dx; // direzione
     int speed;
     char sprite[SPRITE_ROWS][SPRITE_COLS];
+    bool is_badcroc;
+    bool has_shot;
 } Entity;
 
 typedef struct{

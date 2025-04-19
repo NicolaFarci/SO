@@ -32,12 +32,19 @@ void *consumer_thread(void *arg) {
     bool onwater;
     Entity grenade_left, grenade_right;
 
-    // Use lists instead of circular buffers for lanes
+    // lista di corsie
     List lane_list[NUM_RIVER_LANES];
     for (i = 0; i < NUM_RIVER_LANES; i++) {
         list_init(&lane_list[i]);
     }
-    
+
+    List proiettili_coccodrilli;
+    list_init(&proiettili_coccodrilli);
+
+    ListNode* current;
+    ListNode* prev;
+    bool found;
+
     Message msg;
     
     int lives = NUM_LIVES;
@@ -262,17 +269,90 @@ void *consumer_thread(void *arg) {
                 pthread_mutex_unlock(&grenade_mutex);
                 break;
 
+            case MSG_CROC_PROJECTILE:
+                current = proiettili_coccodrilli.head;
+                prev = NULL;
+                found= false;
+                switch (msg.id){
+                    //DESPAWN
+                    case -1:
+                        while(current!=NULL){
+                            if(abs(msg.entity.x - current->data.entity.x) <= 1 && msg.entity.y == current->data.entity.y){
+                                clear_grenade(game_win,&current->data.entity);
+                                
+                                if(prev == NULL){
+                                	proiettili_coccodrilli.head = current->next;
+                                }else{
+                                	prev->next=current->next;
+                                }
+                                if(current == proiettili_coccodrilli.tail){
+                                	proiettili_coccodrilli.tail = prev;
+                                }
+                                ListNode* temp = current;
+                                current = current->next;
+                                free(temp);
+                                proiettili_coccodrilli.count--;
+                                found=true;
+                                break;
+                            }
+                            prev=current;
+                            current=current->next;
+                        }
+                        break;
+                    //UPDATE
+                    case 0:
+                        while(current!=NULL){
+                            if(abs(msg.entity.x - current->data.entity.x) <= 1 && msg.entity.y == current->data.entity.y){
+                                clear_grenade(game_win,&current->data.entity);
+                                current->data = msg;
+                                draw_grenade(game_win, &current->data.entity);
+                                found=true;
+                                break;
+                            }
+                            prev=current;
+                            current=current->next;
+                            
+                        }
+                        break;
+                    //SPAWN
+                    case 1:
+                        beep();
+                        list_push(&proiettili_coccodrilli, msg);
+                        break;
+                    default:
+                        break;
+                }
+                break;
+
             case MSG_CROC_UPDATE:
                 // Find the crocodile in the lane list
-                ListNode* current = lane_list[msg.id].head;
-                ListNode* prev = NULL;
-                bool found = false;
+                current = lane_list[msg.id].head;
+                prev = NULL;
+                found = false;
 
                 while (current != NULL) {
                     if (abs(msg.entity.x - current->data.entity.x) <= 1) {
                         clear_crocodile(game_win, &current->data.entity);
                         current->data = msg;
                         draw_crocodile(game_win, &current->data.entity);
+                        if(current->data.entity.is_badcroc && (rand()%100)< 5 && current->data.entity.has_shot==false){
+                            current->data.entity.has_shot=true;
+                            pthread_t croc_projectile;
+                            GrenadeArgs* croc_proj_args = malloc(sizeof(GrenadeArgs));
+
+                            croc_proj_args->buffer = buffer;
+                            croc_proj_args->speed = 40000;
+                            croc_proj_args->dx = current->data.entity.dx;
+                            croc_proj_args->start_y = current->data.entity.y;
+                            if(croc_proj_args->dx == -1){
+                                croc_proj_args->start_x = current->data.entity.x;
+                            }else{
+                                croc_proj_args->start_x = current->data.entity.x + CROCODILE_WIDTH;
+                            }
+
+                            pthread_create(&croc_projectile, NULL, crocodile_projectile_thread, croc_proj_args);
+                            pthread_detach(croc_projectile);
+                        }
 
                         //se a muoversi e' l'ultimo coccodrillo della lista
                         if (current == lane_list[msg.id].tail){

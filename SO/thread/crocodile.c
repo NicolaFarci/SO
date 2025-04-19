@@ -1,12 +1,17 @@
 #include "crocodile.h"
+#include "grenade.h"
 #include "map.h"
+#include "game.h"
 #include <stdlib.h>
 #include <unistd.h>
-#include <time.h>
 
 void init_lanes(RiverLane lanes[]) {
-    // First lane direction is random
-    lanes[0].direction = (rand() % 2 == 0) ? 1 : -1;
+    int num = rand()%100;
+    if(num%2==0){
+        lanes[0].direction = 1;
+    }else{
+        lanes[0].direction = -1;
+    }
     lanes[0].speed = 200000;
     lanes[0].y = MAP_HEIGHT - 7;
     lanes[0].index = 0;
@@ -31,6 +36,14 @@ void crocodile_init(Entity *crocodile, RiverLane *lane) {
     crocodile->y = lane->y;
     crocodile->dx = lane->direction;
     crocodile->speed = lane->speed;
+    crocodile->has_shot=false;
+    
+    int randnum= rand()%100;
+    if(randnum<20){
+        crocodile->is_badcroc=true;
+    }else{
+        crocodile->is_badcroc=false;
+    }
     
     // Initial x position based on direction
     if (lane->direction > 0) {
@@ -115,19 +128,72 @@ void *crocodile_thread(void *arg) {
 }
 
 void *crocodile_projectile_thread(void *arg) {
-    // Implementation for projectile thread
-    // Similar to grenade threads, but with specific river lane characteristics
+    GrenadeArgs *args = (GrenadeArgs*) arg;
+    CircularBuffer *buffer = args->buffer;
+    Message msg;
+    
+    Entity proiettile;
+    proiettile.has_shot=false;
+    proiettile.dx=args->dx;
+    proiettile.height=1;
+    proiettile.is_badcroc=false;
+    proiettile.speed=args->speed;
+    proiettile.sprite[0][0]='*';
+    proiettile.type=ENTITY_CROCODILEPROJ;
+    proiettile.width=1;
+    proiettile.x=args->start_x;
+    proiettile.y=args->start_y;
+
+    msg.entity=proiettile;
+    msg.id = +1;
+    msg.type=MSG_CROC_PROJECTILE;
+    buffer_push(buffer,msg);
+
+    msg.id = 0;
+
+    while(proiettile.x>0&&proiettile.x<MAP_WIDTH){
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_PAUSED){
+            pthread_mutex_unlock(&game_state_mutex); //sblocca subito per evitare che rimanga bloccato
+            usleep(100000); // aspetta un po e ricontrolla se è ancora in pausa
+            continue;
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+        
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
+
+        usleep(args->speed);
+        proiettile.x += proiettile.dx;
+        msg.entity = proiettile;
+        buffer_push(buffer, msg);
+    }
+
+    msg.id=-1;
+    buffer_push(buffer, msg);
+
+
     return NULL;
 }
 
 void draw_crocodile(WINDOW *win, Entity *crocodile) {
+    int num;
+    if (crocodile->is_badcroc){
+        num=7;
+    }else{
+        num=6;
+    }
     for (int i = 0; i < crocodile->height; i++) {
         for (int j = 0; j < crocodile->width - 1; j++) {
             if(crocodile->y + i < MAP_HEIGHT && crocodile->y + i > 0 &&
                 crocodile->x + j < MAP_WIDTH - 1 && crocodile->x + j > 0){
-                    wattron(win, COLOR_PAIR(6));
+                    wattron(win, COLOR_PAIR(num));
                     mvwaddch(win, crocodile->y + i, crocodile->x + j, crocodile->sprite[i][j]);
-                    wattroff(win, COLOR_PAIR(6));
+                    wattroff(win, COLOR_PAIR(num));
                 }
         }
     }

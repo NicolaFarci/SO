@@ -28,6 +28,8 @@ void list_push(List* list, Message msg) {
     pthread_mutex_unlock(&list->mutex);
 }
 
+
+
 Message list_pop(List* list) {
     pthread_mutex_lock(&list->mutex);
     

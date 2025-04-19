@@ -13,6 +13,7 @@ void init_bckmap(){
     init_pair(4,COLOR_WHITE,COLOR_YELLOW);//TANA LIBERA
     init_pair(5,COLOR_WHITE,COLOR_RED);//TANA OCCUPATA
     init_pair(6,COLOR_GREEN,COLOR_BLUE);//COCCODRILLO
+    init_pair(7,COLOR_YELLOW,COLOR_BLUE);//COCCODRILLO CATTIVO
 
     //associo alla matrice map il valore del color pair apposito
     for(int y = 0; y < MAP_HEIGHT;y++){

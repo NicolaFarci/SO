@@ -12,6 +12,12 @@ void *grenade_thread(void* arg){
     msg.entity.height = 1;
     msg.entity.type = ENTITY_GRENADE;
     msg.entity.dx = args->dx;
+    msg.entity.speed=args->speed;
+
+    msg.entity.has_shot=false;
+    msg.entity.is_badcroc=false;
+    msg.entity.sprite[0][0]='*';
+
     if(msg.entity.dx==-1){
         msg.type = MSG_GRENADE_LEFT;
     }else{

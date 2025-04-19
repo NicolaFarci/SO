@@ -17,7 +17,6 @@ void *frog_thread(void *arg) {
     int ch;
     Message msg;
     bool can_shoot;
-    pthread_t grenade_left_tid, grenade_right_tid;
     int old_x, old_y;
 
     msg.type = MSG_FROG_UPDATE;
@@ -94,6 +93,12 @@ void frog_init(Entity *frog) {
     frog->width = FROG_WIDTH;
     frog->height = FROG_HEIGHT;
     frog->type = ENTITY_FROG;
+
+    frog->has_shot=false;
+    frog->is_badcroc=false;
+    frog->dx=0;
+    frog->speed=0;
+    
     // Forma della rana
     char sprite[FROG_HEIGHT][FROG_WIDTH] = {
         {'v', 'O', 'v'},
