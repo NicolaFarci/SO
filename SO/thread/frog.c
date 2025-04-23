@@ -94,7 +94,7 @@ void frog_init(Entity *frog) {
     frog->height = FROG_HEIGHT;
     frog->type = ENTITY_FROG;
 
-    frog->has_shot=false;
+    frog->cooldown=-1;
     frog->is_badcroc=false;
     frog->dx=0;
     frog->speed=0;

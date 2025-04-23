@@ -305,7 +305,16 @@ void *consumer_thread(void *arg) {
                             if(abs(msg.entity.x - current->data.entity.x) <= 1 && msg.entity.y == current->data.entity.y){
                                 clear_grenade(game_win,&current->data.entity);
                                 current->data = msg;
-                                draw_grenade(game_win, &current->data.entity);
+                                if(current->data.entity.x>=frog.x && current->data.entity.x<frog.x+FROG_WIDTH && current->data.entity.y==frog.y){
+                                    clear_frog(game_win,&frog);
+                                    lives--;
+                                    frog.x = (MAP_WIDTH - FROG_WIDTH ) / 2 ;
+                                    frog.y = MAP_HEIGHT - FROG_HEIGHT - 1;
+                                    time=ROUND_TIME;
+                                    draw_frog(game_win,&frog);
+                                }else{
+                                    draw_grenade(game_win, &current->data.entity);
+                                }
                                 found=true;
                                 break;
                             }
@@ -316,7 +325,6 @@ void *consumer_thread(void *arg) {
                         break;
                     //SPAWN
                     case 1:
-                        beep();
                         list_push(&proiettili_coccodrilli, msg);
                         break;
                     default:
@@ -333,25 +341,28 @@ void *consumer_thread(void *arg) {
                 while (current != NULL) {
                     if (abs(msg.entity.x - current->data.entity.x) <= 1) {
                         clear_crocodile(game_win, &current->data.entity);
-                        current->data = msg;
+                        current->data.entity.x = msg.entity.x;
                         draw_crocodile(game_win, &current->data.entity);
-                        if(current->data.entity.is_badcroc && (rand()%100)< 5 && current->data.entity.has_shot==false){
-                            current->data.entity.has_shot=true;
-                            pthread_t croc_projectile;
-                            GrenadeArgs* croc_proj_args = malloc(sizeof(GrenadeArgs));
+                        if(current->data.entity.is_badcroc && current->data.entity.cooldown>=0){
+                            current->data.entity.cooldown--;
+                            if(current->data.entity.cooldown==0){
+                                pthread_t croc_projectile;
+                                GrenadeArgs* croc_proj_args = malloc(sizeof(GrenadeArgs));
 
-                            croc_proj_args->buffer = buffer;
-                            croc_proj_args->speed = 40000;
-                            croc_proj_args->dx = current->data.entity.dx;
-                            croc_proj_args->start_y = current->data.entity.y;
-                            if(croc_proj_args->dx == -1){
-                                croc_proj_args->start_x = current->data.entity.x;
-                            }else{
-                                croc_proj_args->start_x = current->data.entity.x + CROCODILE_WIDTH;
+                                croc_proj_args->buffer = buffer;
+                                croc_proj_args->speed = 40000;
+                                croc_proj_args->dx = current->data.entity.dx;
+                                croc_proj_args->start_y = current->data.entity.y;
+                                if(croc_proj_args->dx == -1){
+                                    croc_proj_args->start_x = current->data.entity.x;
+                                }else{
+                                    croc_proj_args->start_x = current->data.entity.x + CROCODILE_WIDTH;
+                                }
+
+                                pthread_create(&croc_projectile, NULL, crocodile_projectile_thread, croc_proj_args);
+                                pthread_detach(croc_projectile);
                             }
-
-                            pthread_create(&croc_projectile, NULL, crocodile_projectile_thread, croc_proj_args);
-                            pthread_detach(croc_projectile);
+                            
                         }
 
                         //se a muoversi e' l'ultimo coccodrillo della lista

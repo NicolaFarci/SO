@@ -36,13 +36,14 @@ void crocodile_init(Entity *crocodile, RiverLane *lane) {
     crocodile->y = lane->y;
     crocodile->dx = lane->direction;
     crocodile->speed = lane->speed;
-    crocodile->has_shot=false;
     
     int randnum= rand()%100;
-    if(randnum<20){
+    if(randnum<15){
         crocodile->is_badcroc=true;
+        crocodile->cooldown= 20+randnum;
     }else{
         crocodile->is_badcroc=false;
+        crocodile->cooldown=-1;
     }
     
     // Initial x position based on direction
@@ -133,7 +134,7 @@ void *crocodile_projectile_thread(void *arg) {
     Message msg;
     
     Entity proiettile;
-    proiettile.has_shot=false;
+    proiettile.cooldown=-1;
     proiettile.dx=args->dx;
     proiettile.height=1;
     proiettile.is_badcroc=false;

@@ -62,7 +62,7 @@ typedef struct {
     int speed;
     char sprite[SPRITE_ROWS][SPRITE_COLS];
     bool is_badcroc;
-    bool has_shot;
+    int cooldown;
 } Entity;
 
 typedef struct{

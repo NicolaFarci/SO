@@ -14,7 +14,7 @@ void *grenade_thread(void* arg){
     msg.entity.dx = args->dx;
     msg.entity.speed=args->speed;
 
-    msg.entity.has_shot=false;
+    msg.entity.cooldown=-1;
     msg.entity.is_badcroc=false;
     msg.entity.sprite[0][0]='*';
 
