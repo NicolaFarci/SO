@@ -1,18 +1,24 @@
 #include "frog.h"
 #include "game.h"
-#include "consumer.h"
+#include "buffer.h"
 
-void frog_process(int fd_write) {
-    nodelay(stdscr, FALSE);
+void *frog_thread(void *arg) {
+    CircularBuffer *cb = arg;
+    nodelay(stdscr,FALSE);
     keypad(stdscr, TRUE);
     Message msg;
     msg.type = MSG_FROG_UPDATE;
     while (1) {
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
         msg.entity.dx = 0;
         msg.entity.dy = 0;
         //leggo i tasti premuti dall'utente
         int ch = getch();
-
         switch (ch) {
             case 'w':
             case 'W':
@@ -39,7 +45,7 @@ void frog_process(int fd_write) {
                     Message gmsg;
                     gmsg.type = MSG_GRENADE_SPAWN;
                     //invia il messaggio di spawn della granata
-                    write(fd_write, &gmsg, sizeof(gmsg));
+                    buffer_push(cb, gmsg);
                 }
                 break;
             case 'p':
@@ -48,17 +54,19 @@ void frog_process(int fd_write) {
                     Message pmsg;
                     pmsg.type = MSG_PAUSE;
                     //invia il messaggio di pausa
-                    write(fd_write, &pmsg, sizeof(pmsg));
+                    buffer_push(cb, pmsg);
                 }
                 break;
             default:
                 break;
         }
         //manda solo se ho mosso la rana
-        if (msg.entity.dx != 0 || msg.entity.dy != 0) {
-            write(fd_write, &msg, sizeof(msg));
+        if (msg.entity.dx != 0 || msg.entity.dy != 0) {            
+            buffer_push(cb, msg);
         }
+        usleep(30000);
     }
+    pthread_exit(NULL);
 }
 
 void frog_init(Entity *frog) {

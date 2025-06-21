@@ -2,6 +2,7 @@
 #define MAP_H
 
 #include "game.h"
+#include "buffer.h"
 
 #define BOTTOM_SIDEWALK 4
 

@@ -10,7 +10,7 @@
 #include <time.h>
 #include <stdbool.h>
 #include <signal.h>
-
+#include <pthread.h>
 
 //Dimensione dell'area di gioco
 #define MAP_HEIGHT 31
@@ -23,7 +23,7 @@
 #define FROG_WIDTH 3
 #define FROG_HEIGHT 2
 #define HORIZONTAL_JUMP 1
-#define VERTICAL_JUMP   FROG_HEIGHT
+#define VERTICAL_JUMP FROG_HEIGHT
 
 //Dimensioni Corsie
 #define NUM_RIVER_LANES 10
@@ -33,7 +33,7 @@
 // Parametri di gioco
 #define NUM_LIVES 3
 #define INITIAL_SCORE 0
-#define ROUND_TIME 50
+#define ROUND_TIME 60
 #define NUM_HOLES 5
 
 // Dimensioni massime della matrice sprite
@@ -82,7 +82,7 @@ typedef enum {
 typedef struct {
     MessageType type;
     int lane_id;
-    pid_t id;
+    pthread_t id;
     Entity entity;
 } Message;
 
@@ -99,17 +99,18 @@ typedef enum { EASY = 0, NORMAL = 1, HARD = 2 } Difficulty;
 extern Difficulty difficulty;
 
 
-extern int game_state;  
-extern int score;       
-extern int round_reset_flag;  
+extern int game_state;
+extern int score;
+extern pthread_mutex_t render_mutex;
+extern pthread_mutex_t pause_mutex;
+extern pthread_cond_t pause_cond;
+extern bool paused;
+extern pthread_mutex_t game_state_mutex;
 
 void show_instructions();
 void exit_program();
 Difficulty show_difficulty_menu();
-void start_game();
-void game_state_win();
-void game_over();
-void restart_game();
+bool start_game();
 void draw_entity(Entity *entity);
 void clear_entity(Entity *entity);
 

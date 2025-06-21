@@ -1,6 +1,7 @@
 #include "game.h"
 #include "crocodile.h"
 #include "map.h"
+#include "buffer.h"
 
 // Inizializza le corsie
 void init_lanes(RiverLane lanes[]) {
@@ -38,12 +39,13 @@ void crocodile_init(Entity *crocodile, RiverLane *lane) {
     strcpy(crocodile->sprite[1], "<BBBBBBB>");
 }
 
-void crocodile_process(int fd_write, RiverLane lane) {
-    pid_t my_pid = getpid(); // ottengo il pid del processo corrente
-
-    //sleep casuale tra 1 e 2 secondi
-    int delay_ms = 1 + rand() % 2;
-    usleep(delay_ms * 1000000);
+void *crocodile_thread(void *arg) {
+    CrocArgs *args = (CrocArgs*)arg;
+    CircularBuffer *cb = args->cb;
+    RiverLane lane = args->lane;
+    free(arg);
+    pthread_t my_tid = pthread_self(); // ottengo il pid del processo corrente
+    srand(time(NULL) ^ my_tid); // ottengo il pid del processo corrente
 
     //inizializzo un nuovo coccodrillo
     Entity croc;
@@ -66,10 +68,10 @@ void crocodile_process(int fd_write, RiverLane lane) {
     //messaggio di spawn
     msg.type = MSG_CROC_SPAWN;
     msg.lane_id = lane.index;
-    msg.id = my_pid;
+    msg.id = my_tid;
     msg.entity = croc;
     //scrivo il messaggio di spawn nella pipe
-    write(fd_write, &msg, sizeof(msg));
+    buffer_push(cb, msg);
 
     bool has_shot = false; //indica se il coccodrillo ha già sparato
     bool prefire_warning = false; //indica se il coccodrillo è in fase di pre-fire
@@ -78,7 +80,19 @@ void crocodile_process(int fd_write, RiverLane lane) {
     
     msg.type = MSG_CROC_UPDATE;
     //finché il coccodrillo è nello schermo
-    while ((croc.dx > 0 && croc.x < MAP_WIDTH) || (croc.dx < 0 && croc.x + croc.width > 0)) {
+    while ((croc.dx == 1 && croc.x < MAP_WIDTH) || (croc.dx == -1 && croc.x + croc.width > 0)) {
+        pthread_mutex_lock(&pause_mutex);
+        while (paused) {
+            // Qui il produttore si sospende, non produce nulla
+            pthread_cond_wait(&pause_cond, &pause_mutex);
+        }
+        pthread_mutex_unlock(&pause_mutex);
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
         //se non ha ancora sparato,valutiamo se far partire il warning
         if (!has_shot && !prefire_warning && (rand() % 1000) < shoot_chance) {
             prefire_warning = true; //attiva il pre-fire warning
@@ -104,7 +118,7 @@ void crocodile_process(int fd_write, RiverLane lane) {
             Message pmsg;
             pmsg.type = MSG_PROJECTILE_SPAWN;
             pmsg.lane_id = lane.index;
-            pmsg.id = my_pid;
+            pmsg.id = my_tid;
             // se il coccodrillo sta andando a destra, il proiettile parte a destra del coccodrillo
             if (croc.dx > 0) {
                 pmsg.entity.x = croc.x + croc.width + 1;
@@ -119,13 +133,11 @@ void crocodile_process(int fd_write, RiverLane lane) {
                 if (pmsg.entity.x < 0) 
                     pmsg.entity.x = 0;
             }
-                
             //posizione y del proiettile è la stessa del coccodrillo
-            pmsg.entity.type=ENTITY_PROJECTILE;
             pmsg.entity.y = croc.y;
             pmsg.entity.dx = croc.dx;
             // scrivo il messaggio di spawn del proiettile nella pipe
-            write(fd_write, &pmsg, sizeof(pmsg));
+            buffer_push(cb, pmsg);
 
             has_shot = true; //indica che il coccodrillo ha già sparato
             prefire_warning = false; //disattiva il pre-fire warning
@@ -136,7 +148,7 @@ void crocodile_process(int fd_write, RiverLane lane) {
         }
         //scrivo il messaggio di aggiornamento del coccodrillo nella pipe
         msg.entity = croc;
-        write(fd_write, &msg, sizeof(msg));
+        buffer_push(cb, msg);
         //sposto il coccodrillo in base alla sua direzione
         croc.x += croc.dx;
         usleep(croc.speed);
@@ -145,55 +157,71 @@ void crocodile_process(int fd_write, RiverLane lane) {
     //messaggio di despawn
     msg.type = MSG_CROC_DESPAWN;
     msg.entity = croc;
-    write(fd_write, &msg, sizeof(msg));
+    buffer_push(cb, msg);
 
 
-    exit(0);
+    pthread_exit(NULL);
 }
 
-void projectile_process(int fd_write,int start_x, int start_y, int dx) {
-    //inizializzo un nuovo proiettile
+void *projectile_thread(void *arg) {
+    ProjectileArgs *pargs = arg;
+    CircularBuffer *cb = pargs->cb;
     Message msg;
-    Entity projectile;
-    projectile.type = ENTITY_PROJECTILE;
-    projectile.width = 1;
-    projectile.height = 1;
-    projectile.x = start_x;
-    projectile.y = start_y;
-    projectile.dx = dx;
-    projectile.speed = 40000;
-    projectile.sprite[0][0] = '=';
-    pid_t my_pid = getpid(); // ottengo il pid del processo corrente
+    Entity proj;
+    proj.type = ENTITY_PROJECTILE;
+    proj.width = 1;
+    proj.height = 1;
+    proj.x = pargs->start_x;
+    proj.y = pargs->start_y;
+    proj.dx = pargs->dx;
+    proj.speed = 40000;
+    proj.sprite[0][0] = '=';
+    pthread_t my_tid = pthread_self(); // ottengo il pid del processo corrente
 
     //manda posizione della granata finchè non esce dallo schermo
-    msg.type = MSG_PROJECTILE_UPDATE;
-    while ((projectile.dx > 0 && projectile.x < MAP_WIDTH) ||(projectile.dx < 0 && projectile.x + projectile.width > 0)) {
+    while (1) {
+        pthread_mutex_lock(&pause_mutex);
+        while (paused) {
+            //qui il produttore si sospende, non produce nulla
+            pthread_cond_wait(&pause_cond, &pause_mutex);
+        }
+        pthread_mutex_unlock(&pause_mutex);
+        pthread_mutex_lock(&game_state_mutex);
+        if (game_state == GAME_QUITTING || game_state == GAME_WIN){
+            pthread_mutex_unlock(&game_state_mutex);
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&game_state_mutex);
         msg.type = MSG_PROJECTILE_UPDATE;
-        msg.entity = projectile;
-        msg.id = my_pid;
-        write(fd_write, &msg, sizeof(msg));
+        msg.entity = proj;
+        msg.id = my_tid;
+        buffer_push(cb, msg);
         //sposto il proiettile in base alla sua direzione
-        projectile.x += projectile.dx;
-        usleep(projectile.speed);
+        proj.x += proj.dx;
+        //se il proiettile esce dallo schermo, termina il ciclo
+        if (proj.x <= 0 || proj.x >= MAP_WIDTH) break;
+        usleep(proj.speed);
     }
 
     //messaggio di despawn
     msg.type = MSG_PROJECTILE_DESPAWN;
-    msg.entity = projectile;
-    msg.id = my_pid;
-    write(fd_write, &msg, sizeof(msg));
+    msg.entity = proj;
+    msg.id = my_tid;
+    buffer_push(cb, msg);
 
-
-    exit(0);
+    free(pargs);
+    pthread_exit(NULL);
 }
 //disegna un coccodrillo sullo schermo
 void draw_crocodile(Entity *crocodile) {
     for (int i = 0; i < crocodile->height; i++) {
         for (int j = 0; j < crocodile->width; j++) {
-            attron(COLOR_PAIR(6));// attiva il colore del coccodrillo
-            // disegna il carattere nella posizione del coccodrillo
-            mvaddch(crocodile->y + i, crocodile->x + j, crocodile->sprite[i][j]);
-            attroff(COLOR_PAIR(6));// disattiva il colore del coccodrillo
+            if (crocodile->x + j >=0 && crocodile->x + j < MAP_WIDTH && crocodile->y + i >= 0 && crocodile->y + i < MAP_HEIGHT) {
+                attron(COLOR_PAIR(6));// attiva il colore del coccodrillo
+                // disegna il carattere nella posizione del coccodrillo
+                mvaddch(crocodile->y + i, crocodile->x + j, crocodile->sprite[i][j]);
+                attroff(COLOR_PAIR(6));// disattiva il colore del coccodrillo
+            }
         }
     }
 }
@@ -209,11 +237,9 @@ void draw_projectile(Entity *projectile) {
 }
 //cancella un proiettile dallo schermo
 void clear_projectile(Entity *projectile) {
-    for (int i = 0; i < projectile->height; i++) {
-        for (int j = 0; j < projectile->width; j++) {
-            attron(COLOR_PAIR(map[projectile->y + i][projectile->x + j])); // attiva il colore della cella in cui si trova il proiettile
-            mvaddch(projectile->y + i, projectile->x + j, ' '); // cancella il carattere nella posizione del proiettile
-            attroff(COLOR_PAIR(map[projectile->y + i][projectile->x + j])); 
-        }
+    if (projectile->x >= 0 && projectile->x < MAP_WIDTH && projectile->y >= 0 && projectile->y < MAP_HEIGHT) {
+        attron(COLOR_PAIR(map[projectile->y][projectile->x])); // attiva il colore della cella in cui si trova il proiettile
+        mvaddch(projectile->y, projectile->x, ' '); // cancella il carattere nella posizione del proiettile
+        attroff(COLOR_PAIR(map[projectile->y][projectile->x]));
     }
 }

@@ -13,16 +13,15 @@ void grenade_process(int fd_write,int start_x, int start_y, int dx) {
     grenade.dx = dx;
     grenade.speed = 40000;
     grenade.sprite[0][0] = 'O';
-    pid_t my_pid = getpid();
+    pid_t my_pid = getpid(); // ottengo il pid del processo corrente
 
     //manda posizione della granata finchè non esce dallo schermo
-    msg.type = MSG_GRENADE_UPDATE;
     while ((grenade.dx > 0 && grenade.x < MAP_WIDTH) ||(grenade.dx < 0 && grenade.x + grenade.width > 0)) {
         msg.type = MSG_GRENADE_UPDATE;
         msg.entity = grenade;
         msg.id = my_pid;
         write(fd_write, &msg, sizeof(msg));
-
+        //sposto la granata in base alla sua direzione
         grenade.x += grenade.dx;
         usleep(grenade.speed);
     }
@@ -37,19 +36,19 @@ void grenade_process(int fd_write,int start_x, int start_y, int dx) {
     exit(0);
 }
 
-void draw_grenade(Entity *grenade,WINDOW* game_win) {
-    if (grenade->x >= 0 && grenade->x < MAP_WIDTH && grenade->y >= 0 && grenade->y < MAP_HEIGHT) {
-        wattron(game_win,COLOR_PAIR(map[grenade->y][grenade->x]));
-        mvwaddch(game_win,grenade->y, grenade->x, grenade->sprite[0][0]);
-        wattroff(game_win,COLOR_PAIR(map[grenade->y][grenade->x]));
-    }
+void draw_grenade(Entity *grenade) {
+    attron(COLOR_PAIR(map[grenade->y][grenade->x]));
+    mvaddch(grenade->y, grenade->x, grenade->sprite[0][0]);
+    attroff(COLOR_PAIR(map[grenade->y][grenade->x]));
 }
-    
-void clear_grenade(Entity *grenade,WINDOW* game_win) {
-    if (grenade->x >= 0 && grenade->x < MAP_WIDTH && grenade->y >= 0 && grenade->y < MAP_HEIGHT) {
-        wattron(game_win,COLOR_PAIR(map[grenade->y][grenade->x]));
-        mvwaddch(game_win,grenade->y, grenade->x,' ');
-        wattroff(game_win,COLOR_PAIR(map[grenade->y][grenade->x]));
+
+void clear_grenade(Entity *grenade) {
+    for (int i = 0; i < grenade->height; i++) {
+        for (int j = 0; j < grenade->width; j++) {
+            attron(COLOR_PAIR(map[grenade->y + i][grenade->x + j]));
+            mvaddch(grenade->y + i, grenade->x + j, ' ');
+            attroff(COLOR_PAIR(map[grenade->y + i][grenade->x + j]));
+        }
     }
 }
 

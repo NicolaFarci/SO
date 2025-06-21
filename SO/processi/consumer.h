@@ -14,18 +14,18 @@ typedef struct {
     bool active[MAX_CROCS_PER_LANE];
 } CrocLaneState;
 
-void consumer(int fd_read,int fd_write,WINDOW* game_win,WINDOW *info_win,pid_t spawner_pids[],int n_spawners,RiverLane lanes[],pid_t frog_pid,pid_t timer_pid);
-void frog_move(WINDOW* win,Entity *frog, Entity *frog_prev, int dx, int dy);
+void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int n_spawners,RiverLane lanes[],pid_t frog_pid,pid_t timer_pid);
+void frog_move(Entity *frog, Entity *frog_prev, int dx, int dy);
 bool frog_water_check(Entity *frog, Entity *frog_prev, CrocLaneState lanes_state[], int lane_y[], int *lives, int frog_start_x, int frog_start_y);
-void frog_drift_on_croc(WINDOW* win,Entity *frog, Entity *frog_prev, Entity *croc);
-void check_grenade_projectile_collisions(WINDOW* win,Entity grenades[], Entity gren_prev[], bool gren_active[], pid_t gren_pid[],Entity projectiles[], Entity proj_prev[], bool proj_active[], pid_t proj_pid[]);
+void frog_drift_on_croc(Entity *frog, Entity *frog_prev, Entity *croc);
+void check_grenade_projectile_collisions(Entity grenades[], Entity gren_prev[], bool gren_active[], pid_t gren_pid[],Entity projectiles[], Entity proj_prev[], bool proj_active[], pid_t proj_pid[]);
 bool check_projectile_hits_frog(Entity *p, Entity *f);
 void clean();
-void reset_frog_position(WINDOW* win,Entity *frog,Entity *frog_prev,int frog_start_x,int frog_start_y);
-void reset_crocs_state(CrocLaneState lanes_state[],WINDOW* win);
-void reset_grenades_state(WINDOW* win,bool gren_active[],Entity gren_prev[],int max_gren);
-void reset_projectiles_state(WINDOW* win,bool proj_active[],Entity proj_prev[],int max_proj);
-void restart_round(WINDOW* win,Entity *frog,Entity *frog_prev,int frog_start_x,int frog_start_y,CrocLaneState lanes_state[],RiverLane lanes[], bool gren_active[], bool proj_active[],Entity gren_prev[],Entity proj_prev[]);
+void reset_frog_position(Entity *frog,Entity *frog_prev,int frog_start_x,int frog_start_y);
+void reset_crocs_state(CrocLaneState lanes_state[]);
+void reset_grenades_state(bool gren_active[],Entity gren_prev[],int max_gren);
+void reset_projectiles_state(bool proj_active[],Entity proj_prev[],int max_proj);
+void restart_round(Entity *frog,Entity *frog_prev,int frog_start_x,int frog_start_y,CrocLaneState lanes_state[],RiverLane lanes[], bool gren_active[], bool proj_active[],Entity gren_prev[],Entity proj_prev[]);
 void kill_all_spawners(pid_t spawner_pids[], int n);
 void kill_all_crocs(CrocLaneState lanes_state[]);
 void kill_all_grenades(pid_t gren_pid[], bool gren_active[]);

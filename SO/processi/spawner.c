@@ -7,7 +7,7 @@ void create_spawners(int fd_write, int fd_read, RiverLane lanes[], pid_t spawner
     for (int i = 0; i < n_lanes; i++) {
         pid_t sp = fork();
         if (sp < 0) { perror("fork spawner"); exit(EXIT_FAILURE); }
-        spawner_pids[i] = sp;
+        spawner_pids[i] = sp; // memorizzo il pid dello spawner
         if (sp == 0) {
             //diventa leader del suo process‐group
             setpgid(0, 0);
@@ -18,16 +18,17 @@ void create_spawners(int fd_write, int fd_read, RiverLane lanes[], pid_t spawner
 }
 
 void spawner_process(int fd_write,int fd_read, RiverLane lane) {
-    bool first = true;
-    pid_t self = getpid();
-    srand(time(NULL) ^ self);
+    bool first = true; //indica il primo spawn
+    pid_t self = getpid(); //ottengo il pid del processo corrente
+    srand(time(NULL) ^ self); //seme casuale basato sul pid del processo
 
     while (1) {
+        //se è il primo spawn, il coccodrillo spawna subito
         if (!first) {
             // delay casuale tra 5 e 7 secondi
             int base_sleep = 5 + rand() % 3;
             double total_sleep;
-
+            //regola il tempo di sleep in base alla difficoltà
             if (difficulty == EASY) {
                 //rallenta di 1.2×
                 total_sleep = base_sleep * 1.2 * 1000000;
@@ -39,6 +40,7 @@ void spawner_process(int fd_write,int fd_read, RiverLane lane) {
             else {
                 total_sleep = base_sleep * 1000000;
             }
+            //sleep gestito per il toggle pausa
             interruptible_sleep(total_sleep);
         }
         first = false;
@@ -53,7 +55,7 @@ void spawner_process(int fd_write,int fd_read, RiverLane lane) {
             crocodile_process(fd_write, lane);
             exit(0);
         }
-        clean();
+        clean(); //pulizia dai processi terminati/zombie
     }
 }
 

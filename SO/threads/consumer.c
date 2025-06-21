@@ -7,15 +7,13 @@
 #include "grenade.h"
 #include "spawner.h"
 
-
 // Funzione consumatore che gestisce la logica del gioco
-void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int n_spawners,RiverLane lanes[],pid_t frog_pid,pid_t timer_pid){
+void consumer(CircularBuffer *cb, WINDOW *info_win, RiverLane lanes[], pthread_t spawner_tids[], int n_spawners){
     init_bckmap(); //inizializza la mappa
     init_holes_positions(); //inizializza le posizioni delle tane
     init_map_holes(); //inizializza le tane
     draw_map(); //disegna la mappa
 
-    //variabile per i messaggi
     Message msg;
     //variabile per la rana
     Entity frog;
@@ -26,7 +24,7 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
     int hole_index = -1;
     int holes_reached = 0;
     
-    //stato dei coccodrilli: pid, croc corrente e precedente, attivi/non
+    //stato dei coccodrilli: tid, croc corrente e precedente, attivi/non
     CrocLaneState lanes_state[NUM_RIVER_LANES] = {0};
     CrocLaneState *lane_state = NULL; //serve solo a rendere più leggibile e compatto il codice
 
@@ -37,17 +35,17 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
         lane_y[l] = lane_y[l-1] - FROG_HEIGHT;
     }
 
-    // stato granate: posizioni, pid, attive/non
+    // stato granate: posizioni, tid, attive/non
     Entity grenades[MAX_GRENADES] = {0};
     Entity gren_prev[MAX_GRENADES] = {0};
-    pid_t gren_pid[MAX_GRENADES] = {0};
+    pthread_t gren_tid[MAX_GRENADES] = {0};
     bool gren_active[MAX_GRENADES] = {false};
     int active_grenades = 0;
 
-    // stato proiettili: posizioni, pid, attive/non
+    // stato proiettili: posizioni, tid, attive/non
     Entity projectiles[MAX_PROJECTILES] = {0};
     Entity proj_prev[MAX_PROJECTILES] = {0};
-    pid_t proj_pid[MAX_PROJECTILES] = {0};
+    pthread_t proj_tid[MAX_PROJECTILES] = {0};
     bool proj_active[MAX_PROJECTILES] = {false};
     int proj_count = 0;
     
@@ -61,7 +59,7 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
 
     //variabili per i msg dei croc
     int lane =-1;
-    pid_t id =-1; //usato anche per granate e proiettili
+    pthread_t id =-1; //usato anche per granate e proiettili
     
     //direzione della granata/proiettile
     int dir = 0;
@@ -69,27 +67,31 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
     bool paused = false; //flag per la pausa
 
     while (lives > 0 && game_state == GAME_RUNNING) {
-        if (read(fd_read, &msg, sizeof(msg)) <= 0) break;
+        //prendo un messaggio dal buffer
+        if (!buffer_try_pop(cb, &msg)) {
+            //niente da leggere, salto il ciclo
+            continue;
+        }
         //toggle pausa
         if (msg.type == MSG_PAUSE) {
             paused = !paused;
             if (paused) {
                 //metto in pausa tutti i produttori tranne la rana
-                pause_producers(timer_pid, spawner_pids, n_spawners,gren_pid, gren_active,proj_pid, proj_active);
+                pause_producers();
                 //mostro scritta pausa
                 mvprintw(LINES/2-1,(COLS-6)/2,"PAUSA");
                 mvprintw(LINES/2,  (COLS-23)/2,"Premi P per riprendere");
                 refresh();
-            } else {                         
+            } else {    
                 //riprende tutti i produttori
-                resume_producers(timer_pid, spawner_pids, n_spawners,gren_pid, gren_active,proj_pid, proj_active);
+                resume_producers();
                 //ridisegno
                 clear();
                 draw_map();
                 werase(info_win);
                 wrefresh(info_win);
+                refresh();
             }
-            continue;//ignora ogni altro MSG finché non toggle di nuovo
         }
         if (paused) {
             //scarto tutti i messaggi mentre sono in pausa
@@ -104,11 +106,13 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 // se il tempo è scaduto, resetto il tempo, decremento le vite e resetto il round
                 if (time <= 0) {
                     lives--;
+                    kill_all_entities(spawner_tids, NUM_RIVER_LANES,lanes_state,gren_tid, gren_active,proj_tid, proj_active);
                     time = ROUND_TIME;
-                    proj_count=0;
-                    active_grenades=0;
                     restart_round(&frog,&frog_prev,frog_start_x,frog_start_y,lanes_state,lanes,gren_active,proj_active,gren_prev,proj_prev);
-                    create_spawners(fd_write, fd_read, lanes, spawner_pids, NUM_RIVER_LANES);
+                    proj_count = 0; //resetto il conteggio dei proiettili
+                    active_grenades = 0; //resetto il conteggio delle granate
+                    //creo i nuovi spawner
+                    create_spawners(cb, lanes, spawner_tids, NUM_RIVER_LANES);
                 }
                 break;
             //messaggio dello spostamento della rana
@@ -121,15 +125,15 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 // se è caduta in acqua, resetto il round
                 if (fell_in_water) {
                     lives--; // perde una vita
-                    proj_count=0;
-                    active_grenades=0;
                     //killo tutte le entità
-                    kill_all_entities(spawner_pids, NUM_RIVER_LANES,lanes_state,gren_pid, gren_active,proj_pid, proj_active);
+                    kill_all_entities(spawner_tids, NUM_RIVER_LANES,lanes_state,gren_tid, gren_active,proj_tid, proj_active);
                     //resetto gli stati
                     restart_round(&frog, &frog_prev,frog_start_x, frog_start_y,lanes_state, lanes,gren_active, proj_active,grenades, projectiles);
+                    proj_count = 0; //resetto il conteggio dei proiettili
+                    active_grenades = 0; //resetto il conteggio delle granate
+                    //creo i nuovi spawner
+                    create_spawners(cb, lanes, spawner_tids, NUM_RIVER_LANES);
                     time = ROUND_TIME;
-                    //ricreo i nuovi spawner
-                    create_spawners(fd_write, fd_read, lanes, spawner_pids, NUM_RIVER_LANES);
                     continue;
                 }
                 //controllo se la rana ha raggiunto una tana
@@ -141,38 +145,38 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                     holes_reached++;
                     //se ha raggiunto tutte le tane, vince
                     if (checkHoles()) {
-                    	//Puliamo tutti i processi.
-                    	clean();
-                    	
                         game_state = GAME_WIN;
+                        sleep(1); //aspetto un secondo prima di uscire
                         return;
                     }
                     //incremento il punteggio in base al tempo rimasto
+                    pthread_mutex_lock(&render_mutex);
                     score += time * 100;
+                    pthread_mutex_unlock(&render_mutex);
+                    
                     //killo tutte le entità
-                    kill_all_entities(spawner_pids, NUM_RIVER_LANES,lanes_state,gren_pid, gren_active,proj_pid, proj_active);
+                    kill_all_entities(spawner_tids, NUM_RIVER_LANES,lanes_state,gren_tid, gren_active,proj_tid, proj_active);
                     //resetto gli stati
                     restart_round(&frog, &frog_prev,frog_start_x, frog_start_y,lanes_state, lanes,gren_active, proj_active,grenades, projectiles);
+                    proj_count = 0; //resetto il conteggio dei proiettili
+                    active_grenades = 0; //resetto il conteggio delle granate
+                    //creo i nuovi spawner
+                    create_spawners(cb, lanes, spawner_tids, NUM_RIVER_LANES);
                     time = ROUND_TIME;
-                    proj_count=0;
-                    active_grenades=0;
-                    //ricreo i nuovi spawner
-                    create_spawners(fd_write, fd_read, lanes, spawner_pids, NUM_RIVER_LANES);
                     continue;
                 }
                 //se la rana prova ad entrare in una tana già raggiunta o in una qualsiasi porzione della parte superiore della mappa
                 else if (frog.y == HOLE_Y && hole_index == -1) {
                     lives--; //perde una vita
                     //killo tutte le entità
-                    kill_all_entities(spawner_pids, NUM_RIVER_LANES,lanes_state,gren_pid, gren_active,proj_pid, proj_active);
+                    kill_all_entities(spawner_tids, NUM_RIVER_LANES,lanes_state,gren_tid, gren_active,proj_tid, proj_active);
                     //resetto gli stati
                     restart_round(&frog, &frog_prev,frog_start_x, frog_start_y,lanes_state, lanes,gren_active, proj_active,grenades, projectiles);
+                    proj_count = 0; //resetto il conteggio dei proiettili
+                    active_grenades = 0; //resetto il conteggio delle granate
+                    //creo i nuovi spawner
+                    create_spawners(cb, lanes, spawner_tids, NUM_RIVER_LANES);
                     time = ROUND_TIME;
-                    
-                    proj_count=0;
-                    active_grenades=0;
-                    //ricreo i nuovi spawner
-                    create_spawners(fd_write, fd_read, lanes, spawner_pids, NUM_RIVER_LANES);
                 }
                 break;
             //messaggio di spawn coccodrillo
@@ -185,11 +189,11 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 //controllo se ci sono slot liberi nella corsia
                 for (int i = 0; i < MAX_CROCS_PER_LANE; i++) {
                     //se lo slot è libero, lo occupo
-                    if (!lane_state->active[i]) {
+                    if (!lane_state->active[i] && lane_state->tid[i] == 0) {
                         //aggiorno lo stato del coccodrillo
                         lane_state->crocs[i] = msg.entity;
                         lane_state->prev[i] = msg.entity;
-                        lane_state->pid[i] = id;
+                        lane_state->tid[i] = id;
                         lane_state->active[i] = true;
                         //disegno il coccodrillo
                         draw_crocodile(&lane_state->crocs[i]);
@@ -205,8 +209,8 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 lane_state = &lanes_state[lane];
                 //ciclo per trovare il coccodrillo da aggiornare
                 for (int i = 0; i < MAX_CROCS_PER_LANE; i++) {
-                    //se il coccodrillo è attivo e il suo pid corrisponde a quello del messaggio
-                    if (lane_state->active[i] && lane_state->pid[i] == id) {
+                    //se il coccodrillo è attivo e il suo tid corrisponde a quello del messaggio
+                    if (lane_state->active[i] && lane_state->tid[i] == id) {
                         //aggiorna coccodrillo
                         clear_entity(&lane_state->prev[i]);
                         lane_state->crocs[i] = msg.entity;
@@ -222,14 +226,14 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                         if (fell_in_water) {
                             lives--; //perde una vita
                             //killo tutte le entità
-                            kill_all_entities(spawner_pids, NUM_RIVER_LANES,lanes_state,gren_pid, gren_active,proj_pid, proj_active);
+                            kill_all_entities(spawner_tids, NUM_RIVER_LANES,lanes_state,gren_tid, gren_active,proj_tid, proj_active);
                             //resetto gli stati
                             restart_round(&frog, &frog_prev,frog_start_x, frog_start_y,lanes_state, lanes,gren_active, proj_active,grenades, projectiles);
+                            proj_count = 0; //resetto il conteggio dei proiettili
+                            active_grenades = 0; //resetto il conteggio delle granate
+                            //creo i nuovi spawner
+                            create_spawners(cb, lanes, spawner_tids, NUM_RIVER_LANES);
                             time = ROUND_TIME;
-                    	    proj_count=0;
-                    	    active_grenades=0;
-                            //ricreo i nuovi spawner
-                            create_spawners(fd_write, fd_read, lanes, spawner_pids, NUM_RIVER_LANES);
                             continue;
                         }
                     }
@@ -243,11 +247,12 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 lane_state = &lanes_state[lane];
                 //ciclo per trovare il coccodrillo da rimuovere
                 for (int i = 0; i < MAX_CROCS_PER_LANE; i++) {
-                    //se il coccodrillo è attivo e il suo pid corrisponde a quello del messaggio
-                    if (lane_state->active[i] && lane_state->pid[i] == id) {
+                    //se il coccodrillo è attivo e il suo tid corrisponde a quello del messaggio
+                    if (lane_state->active[i] && lane_state->tid[i] == id) {
                         //rimuovo il coccodrillo
                         clear_entity(&lane_state->prev[i]);
                         lane_state->active[i] = false;
+                        lane_state->tid[i] = 0; //resetto il tid del coccodrillo
                         break;
                     }
                 }
@@ -259,40 +264,38 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                     break;
                 }
                 //granata SINISTRA -> slot 0
-                pid_t g0 = fork();
-                if (g0 < 0) {
-                    perror("fork grenade left");
-                    exit(EXIT_FAILURE);
-                }
-                //se il fork ha successo, il processo figlio esegue la funzione grenade_process
-                if (g0 == 0) {
-                    close(fd_read);
-                    grenade_process(fd_write, frog.x, frog.y, -1);
-                } else {
-                    //se il fork ha successo, il processo padre registra la granata nello slot 0
-                    gren_active[0] = true;
-                    gren_pid[0] = g0;
-                    gren_prev[0] = msg.entity;
-                    grenades[0] = msg.entity;
-                }
+                GrenadeArgs *gargs0 = malloc(sizeof(GrenadeArgs));
+                gargs0->cb = cb;
+                gargs0->start_x = frog.x;
+                gargs0->start_y = frog.y;
+                gargs0->dx = -1;
+                gargs0->slot = 0;
 
-                //granata DESTRA -> slot 1
-                pid_t g1 = fork();
-                if (g1 < 0) {
-                    perror("fork grenade right");
-                    exit(EXIT_FAILURE);
-                }
-                //se il fork ha successo, il processo figlio esegue la funzione grenade_process
-                if (g1 == 0) {
-                    close(fd_read);
-                    grenade_process(fd_write, frog.x, frog.y, +1);
-                } else {
-                    //se il fork ha successo, il processo padre registra la granata nello slot 1
-                    gren_active[1] = true;
-                    gren_pid[1] = g1;
-                    gren_prev[1] = msg.entity;
-                    grenades[1] = msg.entity;
-                }
+                pthread_t gtid0;
+                pthread_create(&gtid0, NULL, grenade_thread, gargs0);
+                pthread_detach(gtid0);
+                // registriamo il thread ID come “id” della granata
+                gren_active[0] = true;
+                gren_tid[0] = gtid0;
+                gren_prev[0] = msg.entity;
+                grenades[0] = msg.entity;
+
+                // GRANATA DESTRA -> slot 1
+                GrenadeArgs *gargs1 = malloc(sizeof(GrenadeArgs));
+                gargs1->cb = cb;
+                gargs1->start_x = frog.x;
+                gargs1->start_y = frog.y;
+                gargs1->dx = +1;
+                gargs1->slot = 1;
+
+                pthread_t gtid1;
+                pthread_create(&gtid1, NULL, grenade_thread, gargs1);
+                pthread_detach(gtid1);
+                gren_active[1] = true;
+                gren_tid[1] = gtid1;
+                gren_prev[1] = msg.entity;
+                grenades[1] = msg.entity;
+
                 //imposto il numero di granate attive a 2
                 active_grenades = MAX_GRENADES;
                 break;
@@ -302,8 +305,8 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 id = msg.id; //id della granata presa dal messaggio
                 //ciclo per trovare la granata da aggiornare
                 for (int i = 0; i < MAX_GRENADES; i++) {
-                    //se la granata è attiva e il suo pid corrisponde a quello del messaggio
-                    if (gren_active[i] && gren_pid[i] == id) {
+                    //se la granata è attiva e il suo tid corrisponde a quello del messaggio
+                    if (gren_active[i] && gren_tid[i] == id) {
                         //aggiorno la granata
                         clear_grenade(&gren_prev[i]);
                         grenades[i] = msg.entity;
@@ -318,11 +321,12 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 id = msg.id; //id della granata presa dal messaggio
                 //ciclo per trovare la granata da rimuovere
                 for (int i = 0; i < MAX_GRENADES; i++) {
-                    //se la granata è attiva e il suo pid corrisponde a quello del messaggio
-                    if (gren_active[i] && gren_pid[i] == id) {
+                    //se la granata è attiva e il suo tid corrisponde a quello del messaggio
+                    if (gren_active[i] && gren_tid[i] == id) {
                         //rimuovo la granata
                         clear_grenade(&gren_prev[i]);
                         gren_active[i] = false;
+                        gren_tid[i] = 0;
                         active_grenades--; //decremento il numero di granate attive
                         break;
                     }
@@ -332,33 +336,27 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
             case MSG_PROJECTILE_SPAWN: {
                 //se siamo già al massimo non sparare
                 if (proj_count >= MAX_PROJECTILES) break;
-                
-	    	Entity projectile;
-	    	projectile.type = ENTITY_PROJECTILE;
-	    	projectile.width = 1;
-	    	projectile.height = 1;
-	    	projectile.x = msg.entity.x;
-	    	projectile.y = msg.entity.y;
-	    	projectile.dx = msg.entity.dx;
-	    	projectile.speed = 40000;
-	    	projectile.sprite[0][0] = '=';
+                //posizione del coccodrillo
+                int cx = msg.entity.x;
+                int cy = msg.entity.y;
+                dir = msg.entity.dx;
 
-                //fork del processo proiettile
-                pid_t p = fork();
-                if (p < 0) { perror("fork projectile"); exit(EXIT_FAILURE); }
-                //se il fork ha successo, il processo figlio esegue la funzione projectile_process
-                if (p == 0) {
-                    close(fd_read);
-                    projectile_process(fd_write, msg.entity.x, msg.entity.y, msg.entity.dx);
-                }
+                pthread_t ptid;
+                ProjectileArgs *pargs = malloc(sizeof(*pargs));
+                pargs->cb = cb;
+                pargs->start_x = msg.entity.x;
+                pargs->start_y = msg.entity.y;
+                pargs->dx = msg.entity.dx;
 
+                pthread_create(&ptid,NULL,projectile_thread,pargs);
+                pthread_detach(ptid);
                 //padre registra il nuovo proiettile nel primo slot libero
                 for (int i = 0; i < MAX_PROJECTILES; i++) {
                     if (!proj_active[i]) {
-                        proj_active[i]   = true;
-                        proj_pid[i] = p;
-                        proj_prev[i] = projectile;
-                        projectiles[i] = projectile;
+                        proj_active[i] = true;
+                        proj_tid[i] = ptid;
+                        proj_prev[i] = msg.entity;
+                        projectiles[i] = msg.entity;
                         proj_count++;
                         break;
                     }
@@ -370,8 +368,8 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 id = msg.id; //id del proiettile preso dal messaggio
                 //ciclo per trovare il proiettile da aggiornare
                 for (int i = 0; i < MAX_PROJECTILES; i++) {
-                    //se il proiettile è attivo e il suo pid corrisponde a quello del messaggio
-                    if (proj_active[i] && proj_pid[i] == id) {
+                    //se il proiettile è attivo e il suo tid corrisponde a quello del messaggio
+                    if (proj_active[i] && proj_tid[i] == id) {
                         //aggiorno il proiettile
                         clear_projectile(&proj_prev[i]);
                         projectiles[i] = msg.entity;
@@ -381,15 +379,14 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                         if (check_projectile_hits_frog(&projectiles[i], &frog)) {
                             lives--; //perde una vita
                             //killo tutte le entità
-                            kill_all_entities(spawner_pids, NUM_RIVER_LANES,lanes_state,gren_pid, gren_active,proj_pid, proj_active);
+                            kill_all_entities(spawner_tids, NUM_RIVER_LANES,lanes_state,gren_tid, gren_active,proj_tid, proj_active);
                             //resetto gli stati
                             restart_round(&frog, &frog_prev,frog_start_x, frog_start_y,lanes_state, lanes,gren_active, proj_active,grenades, projectiles);
+                            proj_count = 0; //resetto il conteggio dei proiettili
+                            active_grenades = 0; //resetto il conteggio delle granate
+                            //creo i nuovi spawner
+                            create_spawners(cb, lanes, spawner_tids, NUM_RIVER_LANES);
                             time = ROUND_TIME;
-                            
-                    	    proj_count=0;
-                    	    active_grenades=0;
-                            //ricreo i nuovi spawner
-                            create_spawners(fd_write, fd_read, lanes, spawner_pids, NUM_RIVER_LANES);
                             continue;
                         }
                         break;
@@ -402,11 +399,12 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 id = msg.id; //id del proiettile preso dal messaggio
                 //ciclo per trovare il proiettile da rimuovere
                 for (int i = 0; i < MAX_PROJECTILES; i++) {
-                    //se il proiettile è attivo e il suo pid corrisponde a quello del messaggio
-                    if (proj_active[i] && proj_pid[i] == id) {
+                    //se il proiettile è attivo e il suo tid corrisponde a quello del messaggio
+                    if (proj_active[i] && proj_tid[i] == id) {
                         //rimuovo il proiettile
                         clear_projectile(&proj_prev[i]);
                         proj_active[i] = false;
+                        proj_tid[i] = 0;
                         proj_count--; //decremento il numero di proiettili attivi
                         break;
                     }
@@ -418,18 +416,16 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
                 break;
         }
         //controllo collisioni tra granate e proiettili
-        check_grenade_projectile_collisions(grenades, gren_prev, gren_active, gren_pid,projectiles, proj_prev, proj_active, proj_pid);
-        clean();//pulizia
+        check_grenade_projectile_collisions(grenades, gren_prev, gren_active, gren_tid,projectiles, proj_prev, proj_active, proj_tid);
         //la rana sarà sempre visibile quindi la disegno per ultima
         draw_entity(&frog);
-    
         // Aggiorna info_win
         werase(info_win);
         box(info_win, 0, 0);
         mvwprintw(info_win, 1, 2,"Lives: %-25dScore: %-25dTime: %-3d",lives, score, time);
         wrefresh(info_win);
-
-        refresh(); // Aggiorna tutto lo schermo
+        //aggiorno lo schermo
+        refresh();
     }
 }
 
@@ -437,12 +433,14 @@ void consumer(int fd_read,int fd_write,WINDOW *info_win,pid_t spawner_pids[],int
 void draw_entity(Entity *entity) {
     for (int i = 0; i < entity->height; i++) {
         for (int j = 0; j < entity->width; j++) {
-            //attiva il colore della cella in cui si trova l'entità
-            attron(COLOR_PAIR(map[entity->y + i][entity->x + j]));
-            //disegna il carattere nella posizione dell'entità
-            mvaddch(entity->y + i, entity->x + j, entity->sprite[i][j]);
-            //disattiva il colore della cella
-            attroff(COLOR_PAIR(map[entity->y + i][entity->x + j]));
+            if (entity->y + i >= 0 && entity->y + i < MAP_HEIGHT && entity->x + j >= 0 && entity->x + j < MAP_WIDTH) {
+                //attiva il colore della cella in cui si trova l'entità
+                attron(COLOR_PAIR(map[entity->y + i][entity->x + j]));
+                //disegna il carattere nella posizione dell'entità
+                mvaddch(entity->y + i, entity->x + j, entity->sprite[i][j]);
+                //disattiva il colore della cella
+                attroff(COLOR_PAIR(map[entity->y + i][entity->x + j]));
+            }
         }
     }
 }
@@ -451,12 +449,14 @@ void draw_entity(Entity *entity) {
 void clear_entity(Entity *entity) {
     for (int i = 0; i < entity->height; i++) {
         for (int j = 0; j < entity->width; j++) {
-            //attiva il colore della cella in cui si trova l'entità
-            attron(COLOR_PAIR(map[entity->y + i][entity->x + j]));
-            //cancella il carattere nella posizione dell'entità
-            mvaddch(entity->y + i, entity->x + j, ' ');
-            //disattiva il colore della cella
-            attroff(COLOR_PAIR(map[entity->y + i][entity->x + j]));
+            if (entity->y + i >= 0 && entity->y + i < MAP_HEIGHT && entity->x + j >= 0 && entity->x + j < MAP_WIDTH) {
+                //attiva il colore della cella in cui si trova l'entità
+                attron(COLOR_PAIR(map[entity->y + i][entity->x + j]));
+                //cancella il carattere nella posizione dell'entità
+                mvaddch(entity->y + i, entity->x + j, ' ');
+                //disattiva il colore della cella
+                attroff(COLOR_PAIR(map[entity->y + i][entity->x + j]));
+            }
         }
     }
 }
@@ -528,7 +528,7 @@ void frog_drift_on_croc(Entity *frog, Entity *frog_prev, Entity *croc) {
         // aggiorna la posizione della rana in base alla direzione del coccodrillo
         frog->x += croc->dx;
         // limita la rana ai bordi dello schermo
-        if (frog->x < 0) 
+        if (frog->x < 0)
             frog->x = 0;
         if (frog->x + frog->width > MAP_WIDTH)
             frog->x = MAP_WIDTH - frog->width;
@@ -537,7 +537,7 @@ void frog_drift_on_croc(Entity *frog, Entity *frog_prev, Entity *croc) {
     }
 }
 // Controlla le collisioni tra granate e proiettili
-void check_grenade_projectile_collisions(Entity grenades[], Entity gren_prev[], bool gren_active[], pid_t gren_pid[],Entity projectiles[], Entity proj_prev[], bool proj_active[], pid_t proj_pid[]){
+void check_grenade_projectile_collisions(Entity grenades[], Entity gren_prev[], bool gren_active[], pthread_t gren_tid[],Entity projectiles[], Entity proj_prev[], bool proj_active[], pthread_t proj_tid[]){
     for (int i = 0; i < MAX_GRENADES; i++) {
         if (!gren_active[i]) continue; //se la granata non è attiva, salta
         for (int j = 0; j < MAX_PROJECTILES; j++) {
@@ -559,14 +559,7 @@ bool check_projectile_hits_frog(Entity *p, Entity *f) {
     return (p->x >= f->x && p->x < f->x + f->width &&
             p->y >= f->y && p->y < f->y + f->height);
 }
-// Pulisce i processi zombie e figli terminati
-void clean() {
-    pid_t w;
-    //ripulisci qualsiasi figlio terminato/zombie
-    while ((w = waitpid(-1, NULL, WNOHANG)) > 0) {
-        // ho ripulito un figlio terminato/zombie 
-    }
-}
+
 // resetta lo stato dei coccodrilli
 void reset_crocs_state(CrocLaneState lanes_state[]) {
     // per ogni corsia, resetto lo stato dei coccodrilli
@@ -574,7 +567,7 @@ void reset_crocs_state(CrocLaneState lanes_state[]) {
         for (int i = 0; i < MAX_CROCS_PER_LANE; i++) {
             clear_entity(&lanes_state[l].prev[i]);
             lanes_state[l].active[i] = false;
-            lanes_state[l].pid[i] = 0;
+            lanes_state[l].tid[i] = 0;
         }
             
     }
@@ -616,15 +609,14 @@ void restart_round(Entity *frog,Entity *frog_prev,int frog_start_x,int frog_star
     init_lanes(lanes); //reinizializza le corsie
 }
 
-void kill_all_spawners(pid_t spawner_pids[], int n) {
+void kill_all_spawners(pthread_t spawner_tids[], int n) {
     for (int i = 0; i < n; i++) {
-        pid_t pgid = spawner_pids[i];
-        if (pgid > 0) {
-            //uccide tutto il process‑group (spawner + coccodrilli figli)
-            kill(-pgid, SIGKILL);       
-            //ripulisce lo spawner
-            waitpid(pgid, NULL, 0);     
-            spawner_pids[i] = 0;
+        pthread_t tid = spawner_tids[i];
+        if (tid > 0) {
+            //termina il thread
+            pthread_cancel(spawner_tids[i]);
+            pthread_join(spawner_tids[i], NULL);
+            spawner_tids[i] = 0;
         }
     }
 }
@@ -634,128 +626,64 @@ void kill_all_crocs(CrocLaneState lanes_state[]) {
     for (int l = 0; l < NUM_RIVER_LANES; l++) {
         //ciclo per ogni coccodrillo nella corsia
         for (int i = 0; i < MAX_CROCS_PER_LANE; i++) {
-            //se il coccodrillo è attivo e ha un pid valido
-            pid_t pid = lanes_state[l].pid[i];
-            if (lanes_state[l].active[i] && pid > 0) {
+            //se il coccodrillo è attivo e ha un tid valido
+            pthread_t tid = lanes_state[l].tid[i];
+            if (lanes_state[l].active[i] && tid > 0) {
                 //termina il coccodrillo
-                kill(pid, SIGKILL);
-                waitpid(pid, NULL, 0); //pulisco il processo
+                pthread_cancel(tid);
+                pthread_join(tid, NULL); 
+                lanes_state[l].tid[i] = 0; //resetto il tid del coccodrillo
             }
         }
     }
 }
 //termina tutte le granate
-void kill_all_grenades(pid_t gren_pid[], bool gren_active[]) {
+void kill_all_grenades(pthread_t gren_tid[], bool gren_active[]) {
     //ciclo per ogni granata
     for (int i = 0; i < MAX_GRENADES; i++) {
-        //se la granata è attiva e ha un pid valido
-        if (gren_active[i] && gren_pid[i] > 0) {
+        //se la granata è attiva e ha un tid valido
+        if (gren_active[i] && gren_tid[i] > 0) {
             //termina la granata
-            kill(gren_pid[i], SIGKILL);
-            waitpid(gren_pid[i], NULL, 0);
+            pthread_cancel(gren_tid[i]);
+            pthread_join(gren_tid[i], NULL);
+            gren_tid[i] = 0; //resetto il tid della granata
         }
     }
 }
 //termina tutti i proiettili
-void kill_all_projectiles(pid_t proj_pid[], bool proj_active[]) {
+void kill_all_projectiles(pthread_t proj_tid[], bool proj_active[]) {
     //ciclo per ogni proiettile
     for (int i = 0; i < MAX_PROJECTILES; i++) {
-        //se il proiettile è attivo e ha un pid valido
-        if (proj_active[i] && proj_pid[i] > 0) {
+        //se il proiettile è attivo e ha un tid valido
+        if (proj_active[i] && proj_tid[i] > 0) {
             //termina il proiettile
-            kill(proj_pid[i], SIGKILL);
-            waitpid(proj_pid[i], NULL, 0);
+            pthread_cancel(proj_tid[i]);
+            pthread_join(proj_tid[i], NULL);
+            proj_tid[i] = 0; //resetto il tid del proiettile
         }
     }
 }
 //termina tutti gli spawner, coccodrilli, granate e proiettili
-void kill_all_entities(pid_t spawner_pids[],int n_spawners,CrocLaneState lanes_state[],pid_t gren_pid[], bool gren_active[],pid_t proj_pid[], bool proj_active[]){
-    kill_all_spawners(spawner_pids, n_spawners);
+void kill_all_entities(pthread_t spawner_tids[],int n_spawners,CrocLaneState lanes_state[],pthread_t gren_tid[], bool gren_active[],pthread_t proj_tid[], bool proj_active[]){
+    kill_all_spawners(spawner_tids, n_spawners);
     kill_all_crocs(lanes_state);
-    kill_all_grenades(gren_pid, gren_active);
-    kill_all_projectiles(proj_pid, proj_active);
+    kill_all_grenades(gren_tid, gren_active);
+    kill_all_projectiles(proj_tid, proj_active);
 }
 
 // PAUSA: ferma timer, spawner, granate e proiettili
-void pause_producers(pid_t timer_pid,pid_t spawner_pids[], int n_spawners,pid_t gren_pid[], bool gren_active[],pid_t proj_pid[], bool proj_active[]) {
-    //metto in pausa timer
-    kill(timer_pid, SIGSTOP);
-    //metto in pausa ogni spawner (e il suo process-group di crocs)
-    stop_all_spawners(spawner_pids, n_spawners);
-    //metto in pausa granate
-    stop_all_grenades(gren_pid, gren_active);
-    //metto in pausa proiettili
-    stop_all_projectiles(proj_pid, proj_active);
+void pause_producers() {
+    pthread_mutex_lock(&pause_mutex);
+    paused = true; //metto in pausa i produttori
+    pthread_mutex_unlock(&pause_mutex);
+    //segnala a tutti i thread in attesa che la pausa è iniziata
+    pthread_cond_broadcast(&pause_cond);
 }
 // RIPRENDI: riprendi timer, spawner, granate e proiettili
-void resume_producers(pid_t timer_pid,pid_t spawner_pids[], int n_spawners,pid_t gren_pid[], bool gren_active[],pid_t proj_pid[], bool proj_active[]) {
-    //riprendo timer
-    kill(timer_pid, SIGCONT);
-    //riprendo spawner (+crocs)
-    resume_all_spawners(spawner_pids, n_spawners);
-    //riprendo granate
-    resume_all_grenades(gren_pid, gren_active);
-    //riprendo proiettili
-    resume_all_projectiles(proj_pid, proj_active);
-}
-
-void stop_all_spawners(pid_t spawner_pids[], int n) {
-    //ciclo per fermare tutti gli spawner
-    for (int i = 0; i < n; i++) {
-        //se lo spawner ha un pid valido
-        if (spawner_pids[i] > 0)
-            kill(-spawner_pids[i], SIGSTOP); // metto in pausa il process-group dello spawner
-        // (il process-group include lo spawner e i coccodrilli figli)
-    }
-}
-
-void stop_all_grenades(pid_t gren_pid[], bool gren_active[]) {
-    //ciclo per fermare tutte le granate
-    for (int i = 0; i < MAX_GRENADES; i++) {
-        //se la granata è attiva e il suo pid è valido
-        if (gren_active[i] && gren_pid[i] > 0) {
-            //metto in pausa la granata
-            kill(gren_pid[i], SIGSTOP);
-        }
-    }
-}
-
-void stop_all_projectiles(pid_t proj_pid[], bool proj_active[]) {
-    //ciclo per fermare tutti i proiettili
-    for (int i = 0; i < MAX_PROJECTILES; i++) {
-        //se il proiettile è attivo e il suo pid è valido
-        if (proj_active[i] && proj_pid[i] > 0) {
-            //metto in pausa il proiettile
-            kill(proj_pid[i], SIGSTOP);
-        }
-    }
-}
-
-void resume_all_spawners(pid_t spawner_pids[], int n) {
-    //ciclo per riprendere tutti gli spawner
-    for (int i = 0; i < n; i++) {
-        //se lo spawner ha un pid valido
-        if (spawner_pids[i] > 0)
-            kill(-spawner_pids[i], SIGCONT); // riprendo il process-group dello spawner
-    }
-}
-void resume_all_grenades(pid_t gren_pid[], bool gren_active[]) {
-    //ciclo per riprendere tutte le granate
-    for (int i = 0; i < MAX_GRENADES; i++) {
-        //se la granata è attiva e il suo pid è valido
-        if (gren_active[i] && gren_pid[i] > 0) {
-            //riprendo la granata
-            kill(gren_pid[i], SIGCONT);
-        }
-    }
-}
-void resume_all_projectiles(pid_t proj_pid[], bool proj_active[]) {
-    //ciclo per riprendere tutti i proiettili
-    for (int i = 0; i < MAX_PROJECTILES; i++) {
-        //se il proiettile è attivo e il suo pid è valido
-        if (proj_active[i] && proj_pid[i] > 0) {
-            //riprendo il proiettile
-            kill(proj_pid[i], SIGCONT);
-        }
-    }
+void resume_producers() {
+    pthread_mutex_lock(&pause_mutex);
+    paused = false; //riprendo i produttori
+    pthread_mutex_unlock(&pause_mutex);
+    //segnala a tutti i thread in attesa che la pausa è finita
+    pthread_cond_broadcast(&pause_cond);
 }

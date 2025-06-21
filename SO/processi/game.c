@@ -21,11 +21,7 @@ void start_game() {
 
     int game_starty = (LINES - MAP_HEIGHT) / 2;
     int game_startx = (COLS - MAP_WIDTH) / 2;
-
-    WINDOW *game_win = newwin(MAP_HEIGHT, MAP_WIDTH, game_starty, game_startx);
-    keypad(game_win, TRUE);
-    box(game_win, 0, 0);
-    WINDOW *info_win = newwin(INFO_HEIGHT, MAP_WIDTH, game_starty+MAP_HEIGHT, game_startx);
+    WINDOW *info_win = newwin(INFO_HEIGHT, MAP_WIDTH, game_starty+MAP_HEIGHT-1, game_startx);
     box(info_win,0,0);
     
     // Processo rana
@@ -57,12 +53,12 @@ void start_game() {
     // Inizializzo le corsie
     RiverLane lanes[NUM_RIVER_LANES];
     init_lanes(lanes);
-
+    // Array per memorizzare i PIDs degli spawner
     pid_t spawner_pids[NUM_RIVER_LANES];
     create_spawners(fd[1],fd[0], lanes, spawner_pids, NUM_RIVER_LANES);
 
     // Processo padre
-    consumer(fd[0], fd[1],game_win, info_win,spawner_pids, NUM_RIVER_LANES,lanes, frog_pid, timer_pid);
+    consumer(fd[0], fd[1],info_win, spawner_pids, NUM_RIVER_LANES,lanes, frog_pid, timer_pid);
     close(fd[0]); // Chiudi il lato di lettura della pipe
     close(fd[1]); // Chiudi il lato di scrittura della pipe
 

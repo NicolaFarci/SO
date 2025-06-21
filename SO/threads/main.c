@@ -80,7 +80,14 @@ int main() {
                     difficulty = show_difficulty_menu();
                     clear();
                     refresh();
-                    start_game();
+                    bool play_again;
+                    do {
+                        clear();
+                        refresh();
+                        play_again = start_game();  
+                        //true = l’utente ha premuto ‘r’ per rigiocare
+                        //false = l’utente ha premuto ‘q’ per tornare al menu
+                    } while (play_again);
                 }
                 else if (selected == 1) {
                     show_instructions();
@@ -118,7 +125,6 @@ void exit_program() {
 
 Difficulty show_difficulty_menu() {
     int sel = 1; //difficoltà predefinita NORMAL
-    keypad(stdscr, TRUE);
     const char *diff_options[NUM_OPTIONS] = {"FACILE","NORMALE","DIFFICILE"};
     while (1) {
         clear();

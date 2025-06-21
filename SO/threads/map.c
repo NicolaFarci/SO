@@ -24,7 +24,6 @@ void init_bckmap() {
 
 // Disegna l'intera mappa
 void draw_map() {
-    clear();
     for (int y = 0; y < MAP_HEIGHT; y++) {
         for (int x = 0; x < MAP_WIDTH; x++) {
             attron(COLOR_PAIR(map[y][x]));
@@ -32,7 +31,6 @@ void draw_map() {
             attroff(COLOR_PAIR(map[y][x]));
         }
     }
-    refresh();
 }
 
 
